@@ -15,9 +15,6 @@ void initArray( int** theArray, int arraySize )
 			theArray[i][j] = value;
 		}
 	}
-
-	printf("Array filled with pseudo-random values\n");
-
 }
 
 void printSquareArray( int** theArray, int arraySize )
