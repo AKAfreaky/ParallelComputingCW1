@@ -1,7 +1,9 @@
 # depslib dependency file v1.0
-1384622692 source:c:\users\alex\development\projects\parallelcomputingcw1\main.c
+1384899862 source:c:\users\alex\development\projects\parallelcomputingcw1\main.c
+	<ctype.h>
 	<stdio.h>
 	<stdlib.h>
+	<unistd.h>
 	<time.h>
 	<string.h>
 	<pthread.h>

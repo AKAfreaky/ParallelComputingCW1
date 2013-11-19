@@ -1,5 +1,7 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <time.h>
 #include <string.h>
 #include <pthread.h>
@@ -18,7 +20,7 @@ typedef struct {
 
 int checkDiff( int** oldArray, int** newArray, int arrayX, int arrayY, int precision)
 {
-	int i,j, retVal = 1; // assume we will pass
+	int i,j;
 
 	for(i = 1; i < arrayX - 1; i++)
 	{
@@ -26,15 +28,17 @@ int checkDiff( int** oldArray, int** newArray, int arrayX, int arrayY, int preci
 		{
 			int oldVal = oldArray[i][j],
 				newVal = newArray[i][j];
+
 			// if the values differ by more than the precision
 			if( abs(oldVal - newVal) > precision )
 			{
-				retVal = 0;	// the arrays are too different
+				return 0;	// the arrays are too different
 			}
 		}
 	}
 
-	return retVal;
+	// Assume we passed
+	return 1;
 }
 
 
@@ -140,14 +144,60 @@ void relaxationThreaded(int** inArray, int** outArray, int arraySize, int precis
 	}
 }
 
+void printUsage()
+{
+	printf("Arguements are:\n"
+			"\t-s\t:\tInteger - The size of the matrix\n"
+			"\t-p\t:\tInteger - The precision to work to\n"
+			"\t-t\t:\tInteger - The number of threads to use\n");
+	system("pause");
+	exit(0);
+}
 
 
-int main()
+
+int main(int argc, char **argv)
 {
 	// Initial values (should get from cmd line)
 	int arraySize = 10;
 	int precision = 10;
 	int numThreads = 2;
+
+	int c;
+	opterr = 0;
+
+	while ((c = getopt (argc, argv, "s:p:t:")) != -1)
+	{
+		switch (c)
+		{
+			case 's':
+				if (sscanf(optarg, "%i", &arraySize) != 1)
+				{
+					fprintf (stderr,
+						"Option -%c requires an interger argument.\n", optopt);
+					printUsage();
+				}
+            	break;
+			case 'p':
+            	if (sscanf(optarg, "%i", &precision) != 1)
+				{
+					fprintf (stderr,
+						"Option -%c requires an interger argument.\n", optopt);
+					printUsage();
+				}
+            	break;
+           	case 't':
+             	if (sscanf(optarg, "%i", &numThreads) != 1)
+				{
+					fprintf (stderr,
+						"Option -%c requires an interger argument.\n", optopt);
+					printUsage();
+				}
+            	break;
+          	default:
+          		printUsage();
+           }
+	}
 
 	if (numThreads > PTHREAD_THREADS_MAX)
 	{
@@ -155,18 +205,32 @@ int main()
 	}
 
 	// Initializing and mallocing the arrays
-	printf("Creating 2 square arrays of arraySize %d\n", arraySize);
 	int** currArray = make2DIntArray(arraySize, arraySize);
 	int** nextArray = make2DIntArray(arraySize, arraySize);
 	initArray(currArray, arraySize);
 	//initArray(nextArray, arraySize);
-	printf("Initial array:\n");
-	printSquareArray(currArray, arraySize);
+
+	if (arraySize < 11)
+	{
+		printf("Initial array:\n");
+		printSquareArray(currArray, arraySize);
+	}
+	else
+	{
+		printf("Starting relaxation of a %d x %d matrix to precision %d\n", arraySize, arraySize, precision);
+	}
 
 	relaxationThreaded(currArray, nextArray, arraySize, precision, numThreads);
 
-	printf("Final output:\n");
-	printSquareArray(nextArray, arraySize);
+	if (arraySize < 11)
+	{
+		printf("Final output:\n");
+		printSquareArray(nextArray, arraySize);
+	}
+	else
+	{
+		printf("Relaxation finished.\n");
+	}
 
 	free2DIntArray(currArray, arraySize);
 	free2DIntArray(nextArray, arraySize);
