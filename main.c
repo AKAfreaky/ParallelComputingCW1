@@ -9,16 +9,17 @@
 #include "arrayHelpers.h"
 
 typedef struct {
-	int** inArray;
-	int** outArray;
+	float** inArray;
+	float** outArray;
 	int arrayX;
 	int arrayY;
-	int precision;
-	sem_t* flagComplete;
+	float precision;
 } LoopData;
 
+int __VERBOSE;
 
-int checkDiff( int** oldArray, int** newArray, int arrayX, int arrayY, int precision)
+
+int checkDiff( float** oldArray, float** newArray, int arrayX, int arrayY, float precision)
 {
 	int i,j;
 
@@ -26,12 +27,17 @@ int checkDiff( int** oldArray, int** newArray, int arrayX, int arrayY, int preci
 	{
 		for(j = 1; j < arrayY - 1; j++)
 		{
-			int oldVal = oldArray[i][j],
-				newVal = newArray[i][j];
+			float oldVal = oldArray[i][j],
+				  newVal = newArray[i][j];
 
 			// if the values differ by more than the precision
 			if( abs(oldVal - newVal) > precision )
 			{
+				if (__VERBOSE)
+				{
+					printf("checkDiff failed on pos(%d, %d).\n", i, j);
+				}
+
 				return 0;	// the arrays are too different
 			}
 		}
@@ -42,7 +48,7 @@ int checkDiff( int** oldArray, int** newArray, int arrayX, int arrayY, int preci
 }
 
 
-void averageFour( int** inArray, int** outArray, int arrayX, int arrayY)
+void averageFour( float** inArray, float** outArray, int arrayX, int arrayY)
 {
 	int i, j;
 	//from pos 1 to arraySize-2 as edges are fixed
@@ -50,13 +56,13 @@ void averageFour( int** inArray, int** outArray, int arrayX, int arrayY)
 	{
 		for(j = 1; j < arrayY - 1; j++)
 		{
-			int n,s,e,w;
+			float n,s,e,w;
 			n	=	inArray[i-1][j];
 			s	=	inArray[i+1][j];
 			e	=	inArray[i][j+1];
 			w	=	inArray[i][j-1];
 
-			outArray[i][j] = (n + s + e + w) / 4;
+			outArray[i][j] = (n + s + e + w) / 4.0f;
 
 		}
 	}
@@ -72,15 +78,15 @@ void* threadLoop( void* inData)
 	int i, diff = 0, count = 0;
 
 	// Little bit of indirection to make access easier/simpler
-	int** currArray = theData->inArray;
-	int** nextArray = theData->outArray;
-	int   arrayX	= theData->arrayX;
-	int   arrayY	= theData->arrayY;
-	int	  precision = theData->precision;
+	float** currArray	= theData->inArray;
+	float** nextArray	= theData->outArray;
+	int   	arrayX		= theData->arrayX;
+	int   	arrayY		= theData->arrayY;
+	float 	precision 	= theData->precision;
 
 	for( i = 0; i < arrayX; i++)
 	{
-		memcpy(nextArray[i], theData->inArray[i], arrayY * sizeof(int));
+		memcpy(nextArray[i], theData->inArray[i], arrayY * sizeof(float));
 	}
 
 	while( diff == 0 )
@@ -90,7 +96,7 @@ void* threadLoop( void* inData)
 		//copy the next array into the working copy.
 		for( i = 1; i < arrayX - 1; i++)
 		{
-			memcpy(currArray[i], nextArray[i], arrayY * sizeof(int));
+			memcpy(currArray[i], nextArray[i], arrayY * sizeof(float));
 		}
 
 		averageFour(currArray, nextArray, arrayX, arrayY);
@@ -99,48 +105,72 @@ void* threadLoop( void* inData)
 
 	}
 
-	printf("Relaxed array %d x %d to precision %d in %d loops on thread %d\n", arrayX, arrayY, precision, count, (int)pthread_self().p);
+	//if (__VERBOSE)
+	//{
+	//	printf("Relaxation finished for thread %d", (int)pthread_self());
+	//}
 
 	return 0;
 }
 
 
-void relaxationThreaded(int** inArray, int** outArray, int arraySize, int precision, int numThreads)
+void relaxationThreaded(float** inArray, float** outArray, int arraySize, float precision, int numThreads)
 {
-	//== Threading setup==
-
-	// Calculate granularity
-	int currPos = 0;
-	int threadChunk = (arraySize / numThreads) + 2; // plus 2 because we want to overlap and edges are kept constant by the functions
-
-	// To store the data for the thread function
-	LoopData	loopDataArray[numThreads];
-	pthread_t 	threads[numThreads];
-
-	// Loop and create/start threads
-	int i;
-	for ( i = 0; i < numThreads; i++)
+	if (numThreads > 0)
 	{
-		//pthread_t newThread;
+		//== Threading setup ==
 
-		int columnsRemaining = (arraySize - currPos);
+		// Calculate granularity
+		int currPos = 0;
+		int threadChunk = (arraySize / numThreads) + 2; // plus 2 because we want to overlap and edges are kept constant by the functions
 
-		loopDataArray[i].inArray 		= &inArray[currPos];
-		loopDataArray[i].outArray		= &outArray[currPos];
-		loopDataArray[i].arrayX 		= threadChunk > columnsRemaining ?
-									 	  columnsRemaining : threadChunk;
-		loopDataArray[i].arrayY 		= arraySize;
-		loopDataArray[i].precision 		= precision;
+		// To store the data for the thread function
+		LoopData	loopDataArray[numThreads];
+		pthread_t 	threads[numThreads];
 
-		pthread_create(&threads[i], NULL, threadLoop, (void*)&loopDataArray[i]);
+		// Loop and create/start threads
+		int i;
+		for ( i = 0; i < numThreads; i++)
+		{
+			//pthread_t newThread;
 
-		currPos = threadChunk - 2;
+			int columnsRemaining = (arraySize - currPos);
 
+			loopDataArray[i].inArray 		= &inArray[currPos];
+			loopDataArray[i].outArray		= &outArray[currPos];
+			loopDataArray[i].arrayX 		= threadChunk > columnsRemaining ?
+											  columnsRemaining : threadChunk;
+			loopDataArray[i].arrayY 		= arraySize;
+			loopDataArray[i].precision 		= precision;
+
+			if (__VERBOSE)
+			{
+				printf("Starting thread %d", i);
+			}
+
+			pthread_create(&threads[i], NULL, threadLoop, (void*)&loopDataArray[i]);
+
+			currPos = threadChunk - 2;
+
+		}
+
+		// join will block if the thread is going, otherwise doesn't block.
+		for( i = 0; i < numThreads; i++)
+		{
+			pthread_join(threads[i], NULL);
+		}
 	}
-
-	for( i = 0; i < numThreads; i++)
+	else
 	{
-		pthread_join(threads[i], NULL);
+		//== Serial Computation ==
+		LoopData data;
+		data.inArray 	= inArray;
+		data.outArray 	= outArray;
+		data.arrayX 	= arraySize;
+		data.arrayY		= arraySize;
+		data.precision 	= precision;
+
+		threadLoop((void*)&data);
 	}
 }
 
@@ -148,7 +178,7 @@ void printUsage()
 {
 	printf("Arguements are:\n"
 			"\t-s\t:\tInteger - The size of the matrix\n"
-			"\t-p\t:\tInteger - The precision to work to\n"
+			"\t-p\t:\tFloat   - The precision to work to\n"
 			"\t-t\t:\tInteger - The number of threads to use\n");
 	system("pause");
 	exit(0);
@@ -159,14 +189,17 @@ void printUsage()
 int main(int argc, char **argv)
 {
 	// Initial values (should get from cmd line)
-	int arraySize = 10;
-	int precision = 10;
-	int numThreads = 2;
+	int arraySize	= 10;
+	float precision	= 10;
+	int numThreads 	= 2;
+	__VERBOSE 		= 0;
 
+	// Read options
+	// -s is the size, -p is the precision and -t is number of threads.
+	// -v turns on some debug spew
 	int c;
 	opterr = 0;
-
-	while ((c = getopt (argc, argv, "s:p:t:")) != -1)
+	while ((c = getopt (argc, argv, "s:p:t:v")) != -1)
 	{
 		switch (c)
 		{
@@ -174,15 +207,15 @@ int main(int argc, char **argv)
 				if (sscanf(optarg, "%i", &arraySize) != 1)
 				{
 					fprintf (stderr,
-						"Option -%c requires an interger argument.\n", optopt);
+						"Option -%c requires an integer argument.\n", optopt);
 					printUsage();
 				}
             	break;
 			case 'p':
-            	if (sscanf(optarg, "%i", &precision) != 1)
+            	if (sscanf(optarg, "%f", &precision) != 1)
 				{
 					fprintf (stderr,
-						"Option -%c requires an interger argument.\n", optopt);
+						"Option -%c requires an float argument.\n", optopt);
 					printUsage();
 				}
             	break;
@@ -190,10 +223,13 @@ int main(int argc, char **argv)
              	if (sscanf(optarg, "%i", &numThreads) != 1)
 				{
 					fprintf (stderr,
-						"Option -%c requires an interger argument.\n", optopt);
+						"Option -%c requires an integer argument.\n", optopt);
 					printUsage();
 				}
             	break;
+			case 'v':
+				__VERBOSE = 1;
+				break;
           	default:
           		printUsage();
            }
@@ -204,36 +240,30 @@ int main(int argc, char **argv)
 		numThreads = PTHREAD_THREADS_MAX;
 	}
 
-	// Initializing and mallocing the arrays
-	int** currArray = make2DIntArray(arraySize, arraySize);
-	int** nextArray = make2DIntArray(arraySize, arraySize);
-	initArray(currArray, arraySize);
-	//initArray(nextArray, arraySize);
+	clock_t start_t, end_t, durr_t;
 
-	if (arraySize < 11)
+	start_t = clock();
+
+	if (__VERBOSE)
 	{
-		printf("Initial array:\n");
-		printSquareArray(currArray, arraySize);
+		printf("Starting to relax %d square array to precision %f. startticks: %l", arraySize, precision, start_t);
 	}
-	else
-	{
-		printf("Starting relaxation of a %d x %d matrix to precision %d\n", arraySize, arraySize, precision);
-	}
+
+	// Initializing and mallocing the arrays
+	float** currArray = make2DFloatArray(arraySize, arraySize);
+	float** nextArray = make2DFloatArray(arraySize, arraySize);
+	initArray(currArray, arraySize);
 
 	relaxationThreaded(currArray, nextArray, arraySize, precision, numThreads);
 
-	if (arraySize < 11)
-	{
-		printf("Final output:\n");
-		printSquareArray(nextArray, arraySize);
-	}
-	else
-	{
-		printf("Relaxation finished.\n");
-	}
+	free2DFloatArray(currArray, arraySize);
+	free2DFloatArray(nextArray, arraySize);
 
-	free2DIntArray(currArray, arraySize);
-	free2DIntArray(nextArray, arraySize);
-	system("pause");
+	end_t = clock();
+	durr_t = end_t - start_t;
+	float durr_s = durr_t / CLOCKS_PER_SEC;
+
+	printf("Relaxed %d square matrix in %l ticks (%f sec, endticks: %l)\n", arraySize, durr_t, durr_s, end_t);
+
 	return 0;
 }

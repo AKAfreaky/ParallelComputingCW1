@@ -3,7 +3,7 @@
 #include <time.h>
 
 // fills a 2D-square array with random values
-void initArray( int** theArray, int arraySize )
+void initArray( float** theArray, int arraySize )
 {
 	srand( time( 0 ) );
 	int i, j;
@@ -17,32 +17,32 @@ void initArray( int** theArray, int arraySize )
 	}
 }
 
-void printSquareArray( int** theArray, int arraySize )
+void printSquareArray( float** theArray, int arraySize )
 {
 	int i, j;
 	for( i = 0; i < arraySize; i++ )
 	{
 		for( j = 0; j < arraySize; j++ )
 		{
-			printf("%d\t", theArray[i][j]);
+			printf("%f\t", theArray[i][j]);
 		}
 		printf("\n");
 	}
 }
 
 
-int** make2DIntArray(int arraySizeX, int arraySizeY)
+float** make2DFloatArray(int arraySizeX, int arraySizeY)
 {
 	int **theArray, i;
-	theArray = (int**) malloc(arraySizeX*sizeof(int*));
+	theArray = (float**) malloc(arraySizeX*sizeof(float*));
 	for (i = 0; i < arraySizeX; i++)
 	{
-		theArray[i] = (int*) malloc(arraySizeY*sizeof(int));
+		theArray[i] = (float*) malloc(arraySizeY*sizeof(float));
 	}
 	return theArray;
 }
 
-void free2DIntArray(int** theArray, int arraySizeX)
+void free2DFloatArray(float** theArray, int arraySizeX)
 {
 	int i;
 	for (i = 0; i < arraySizeX; i++)
