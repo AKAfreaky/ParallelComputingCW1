@@ -3,9 +3,9 @@
 #include <time.h>
 
 // fills a 2D-square array with random values
-void initArray( float** theArray, int arraySize )
+void initArray( float** theArray, int arraySize, int seed )
 {
-	srand( time( 0 ) );
+	srand( seed ? seed : time( 0 ) );
 	int i, j;
 	for( i = 0; i < arraySize; i++ )
 	{
@@ -33,11 +33,12 @@ void printSquareArray( float** theArray, int arraySize )
 
 float** make2DFloatArray(int arraySizeX, int arraySizeY)
 {
-	int **theArray, i;
-	theArray = (float**) malloc(arraySizeX*sizeof(float*));
+	float **theArray;
+	int i;
+	theArray = malloc(arraySizeX*sizeof(float*));
 	for (i = 0; i < arraySizeX; i++)
 	{
-		theArray[i] = (float*) malloc(arraySizeY*sizeof(float));
+		theArray[i] = malloc(arraySizeY*sizeof(float));
 	}
 	return theArray;
 }

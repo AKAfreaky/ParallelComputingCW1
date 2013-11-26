@@ -19,7 +19,11 @@ typedef struct {
 int __VERBOSE;
 
 
-int checkDiff( float** oldArray, float** newArray, int arrayX, int arrayY, float precision)
+int checkDiff( 	float** oldArray,
+				float** newArray,
+				int arrayX,
+				int arrayY,
+				float precision)
 {
 	int i,j;
 
@@ -105,16 +109,20 @@ void* threadLoop( void* inData)
 
 	}
 
-	//if (__VERBOSE)
-	//{
-	//	printf("Relaxation finished for thread %d", (int)pthread_self());
-	//}
+	if (__VERBOSE)
+	{
+		//printf("Relaxation finished for thread %d", (int)pthread_self());
+	}
 
 	return 0;
 }
 
 
-void relaxationThreaded(float** inArray, float** outArray, int arraySize, float precision, int numThreads)
+void relaxationThreaded(float** inArray,
+						float** outArray,
+						int arraySize,
+						float precision,
+						int numThreads)
 {
 	if (numThreads > 0)
 	{
@@ -122,7 +130,9 @@ void relaxationThreaded(float** inArray, float** outArray, int arraySize, float 
 
 		// Calculate granularity
 		int currPos = 0;
-		int threadChunk = (arraySize / numThreads) + 2; // plus 2 because we want to overlap and edges are kept constant by the functions
+		// plus 2 because we want to overlap and edges are
+		// kept constant by the functions.
+		int threadChunk = (arraySize / numThreads) + 2;
 
 		// To store the data for the thread function
 		LoopData	loopDataArray[numThreads];
@@ -145,10 +155,11 @@ void relaxationThreaded(float** inArray, float** outArray, int arraySize, float 
 
 			if (__VERBOSE)
 			{
-				printf("Starting thread %d", i);
+				printf("Starting thread %d.\n", i);
 			}
 
-			pthread_create(&threads[i], NULL, threadLoop, (void*)&loopDataArray[i]);
+			pthread_create(&threads[i], NULL,
+							threadLoop, (void*)&loopDataArray[i]);
 
 			currPos = threadChunk - 2;
 
@@ -176,10 +187,14 @@ void relaxationThreaded(float** inArray, float** outArray, int arraySize, float 
 
 void printUsage()
 {
-	printf("Arguements are:\n"
-			"\t-s\t:\tInteger - The size of the matrix\n"
-			"\t-p\t:\tFloat   - The precision to work to\n"
-			"\t-t\t:\tInteger - The number of threads to use\n");
+	printf("Arguments are:\n"
+			"\t-s\t:\tInteger\t-\tThe size of the matrix\n"
+			"\t-p\t:\tFloat\t-\tThe precision to work to\n"
+			"\t-t\t:\tInteger\t-\tThe number of threads to use\n"
+			"\t-r\t:\tInteger\t-\tSeed to use when filling the array. "
+			"Zero will use current time() as the seed\n"
+			"\t-v\t:\tNone\t-\tFlag to enable more console spew\n");
+	// Windows command to stop console applications closing immediately.
 	system("pause");
 	exit(0);
 }
@@ -193,29 +208,41 @@ int main(int argc, char **argv)
 	float precision	= 10;
 	int numThreads 	= 2;
 	__VERBOSE 		= 0;
+	int arrSeed		= time(0);
 
 	// Read options
 	// -s is the size, -p is the precision and -t is number of threads.
 	// -v turns on some debug spew
 	int c;
 	opterr = 0;
-	while ((c = getopt (argc, argv, "s:p:t:v")) != -1)
+	while ((c = getopt (argc, argv, "s:p:t:vr:")) != -1)
 	{
 		switch (c)
 		{
-			case 's':
-				if (sscanf(optarg, "%i", &arraySize) != 1)
-				{
-					fprintf (stderr,
-						"Option -%c requires an integer argument.\n", optopt);
-					printUsage();
-				}
-            	break;
 			case 'p':
             	if (sscanf(optarg, "%f", &precision) != 1)
 				{
 					fprintf (stderr,
-						"Option -%c requires an float argument.\n", optopt);
+					"Option -%c requires a float argument.\n",
+					 optopt);
+					printUsage();
+				}
+            	break;
+			case 'r':
+				if (sscanf(optarg, "%i", &arrSeed) != 1)
+				{
+					fprintf (stderr,
+					"Option -%c requires an integer argument.\n",
+					 optopt);
+					printUsage();
+				}
+				break;
+			case 's':
+				if (sscanf(optarg, "%i", &arraySize) != 1)
+				{
+					fprintf (stderr,
+					"Option -%c requires an integer argument.\n",
+					 optopt);
 					printUsage();
 				}
             	break;
@@ -223,7 +250,8 @@ int main(int argc, char **argv)
              	if (sscanf(optarg, "%i", &numThreads) != 1)
 				{
 					fprintf (stderr,
-						"Option -%c requires an integer argument.\n", optopt);
+					"Option -%c requires an integer argument.\n",
+					 optopt);
 					printUsage();
 				}
             	break;
@@ -234,36 +262,43 @@ int main(int argc, char **argv)
           		printUsage();
            }
 	}
-
+#ifdef PTHREAD_THREADS_MAX
 	if (numThreads > PTHREAD_THREADS_MAX)
 	{
 		numThreads = PTHREAD_THREADS_MAX;
 	}
-
+#endif
 	clock_t start_t, end_t, durr_t;
 
 	start_t = clock();
 
-	if (__VERBOSE)
-	{
-		printf("Starting to relax %d square array to precision %f. startticks: %l", arraySize, precision, start_t);
-	}
+	printf("Starting to relax %d square array to precision %f.",
+			arraySize, precision);
+
+	printf("Using %d thread%s (other than main). starttick: %ld",
+		numThreads, numThreads == 1 ? "" : "s", start_t);
+
+	printf(". Seed: %d.\n", arrSeed);
 
 	// Initializing and mallocing the arrays
-	float** currArray = make2DFloatArray(arraySize, arraySize);
-	float** nextArray = make2DFloatArray(arraySize, arraySize);
-	initArray(currArray, arraySize);
+	float** initialArray	= make2DFloatArray(arraySize, arraySize);
+	float** finalArray 		= make2DFloatArray(arraySize, arraySize);
+	initArray(initialArray, arraySize, arrSeed);
 
-	relaxationThreaded(currArray, nextArray, arraySize, precision, numThreads);
+	relaxationThreaded(initialArray, finalArray, arraySize, precision, numThreads);
 
-	free2DFloatArray(currArray, arraySize);
-	free2DFloatArray(nextArray, arraySize);
+	free2DFloatArray(initialArray, arraySize);
+	free2DFloatArray(finalArray, arraySize);
 
 	end_t = clock();
 	durr_t = end_t - start_t;
-	float durr_s = durr_t / CLOCKS_PER_SEC;
+	float durr_s = (durr_t * 1.0f) / (CLOCKS_PER_SEC * 1.0f);
 
-	printf("Relaxed %d square matrix in %l ticks (%f sec, endticks: %l)\n", arraySize, durr_t, durr_s, end_t);
+	printf("Relaxed %d square matrix in %ld ticks (%f sec, endticks: %ld)\n",
+		 arraySize, durr_t, durr_s, end_t);
+
+	// Windows command to stop console applications closing immediately.
+	system("pause");
 
 	return 0;
 }

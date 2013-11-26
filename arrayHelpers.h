@@ -2,7 +2,7 @@
 #define ARRAYHELPERS_H_INCLUDED
 
 // fills a 2D-square array with random values
-void initArray( float** theArray, int arraySize );
+void initArray( float** theArray, int arraySize, int seed );
 
 void printSquareArray( float** theArray, int arraySize );
 
