@@ -8,17 +8,28 @@
 #include <semaphore.h>
 #include "arrayHelpers.h"
 
+// Struct for passing data to threads
 typedef struct {
+	/* Data */
 	float** inArray;
 	float** outArray;
 	int arrayX;
 	int arrayY;
 	float precision;
+	/* Sync stuff */
+	int numThreads;
+	int* finishedThreads;
+	pthread_barrier_t* barrier;
+	pthread_mutex_t* finLock;
 } LoopData;
 
+// Global 'debugging' variable
 int __VERBOSE;
 
 
+/* Checks if the values in oldArray differ from the values in newArray by less
+	than the precision. Returns 1 if the don't differ, 0 if they do.
+*/
 int checkDiff( 	float** oldArray,
 				float** newArray,
 				int arrayX,
@@ -52,6 +63,9 @@ int checkDiff( 	float** oldArray,
 }
 
 
+/* Averages the values surrounding cardinal values in inArray and sets the
+	average to outArray. Ignores edges.
+*/
 void averageFour( float** inArray, float** outArray, int arrayX, int arrayY)
 {
 	int i, j;
@@ -74,50 +88,102 @@ void averageFour( float** inArray, float** outArray, int arrayX, int arrayY)
 }
 
 
-
+/* The processing loop. Kinda superstep style, everyone copies,
+	everyone averages and then everyone checks if they're done.
+	Will quit when every thread says it has finished.
+*/
 void* threadLoop( void* inData)
 {
 	LoopData* theData = (LoopData*) inData;
 
-	int i, diff = 0, count = 0;
+	int i, diff = 0;
 
 	// Little bit of indirection to make access easier/simpler
-	float** currArray	= theData->inArray;
-	float** nextArray	= theData->outArray;
-	int   	arrayX		= theData->arrayX;
-	int   	arrayY		= theData->arrayY;
-	float 	precision 	= theData->precision;
+	float** currArray		= theData->inArray;
+	float** nextArray		= theData->outArray;
+	int   	arrayX			= theData->arrayX;
+	int   	arrayY			= theData->arrayY;
+	float 	precision 		= theData->precision;
+	int* 	finishedThreads	= theData->finishedThreads;
 
 	for( i = 0; i < arrayX; i++)
 	{
 		memcpy(nextArray[i], theData->inArray[i], arrayY * sizeof(float));
 	}
 
-	while( diff == 0 )
+	while( 1 )
 	{
-		count++;
-
 		//copy the next array into the working copy.
 		for( i = 1; i < arrayX - 1; i++)
 		{
 			memcpy(currArray[i], nextArray[i], arrayY * sizeof(float));
 		}
 
+		//Wait until everyones done that
+		if(theData->barrier != NULL)
+		{
+			pthread_barrier_wait(theData->barrier);
+		}
+
 		averageFour(currArray, nextArray, arrayX, arrayY);
+
+		//Wait until everyones done that
+		if(theData->barrier != NULL)
+		{
+			pthread_barrier_wait(theData->barrier);
+		}
+
 
 		diff = checkDiff(currArray, nextArray, arrayX, arrayY, precision);
 
+		if (diff != 0)
+		{
+
+			if(theData->finLock != NULL)
+			{
+				pthread_mutex_lock(theData->finLock);
+			}
+
+			(*finishedThreads)++;
+
+			if(theData->finLock != NULL)
+			{
+				pthread_mutex_unlock(theData->finLock);
+			}
+		}
+
+		// Wait for everyone again
+		if(theData->barrier != NULL)
+		{
+			pthread_barrier_wait(theData->barrier);
+		}
+
+		// If everyone is done we can go
+		if ((*finishedThreads) == theData->numThreads)
+		{
+			break;
+		}
+		else //otherwise we have to try again
+		{
+			(*finishedThreads) = 0;
+			// Didn't lock as we're setting to a constant and the only other
+			// modification of the variable is behind a barrier in the loop.
+		}
+
 	}
 
-	if (__VERBOSE)
-	{
-		//printf("Relaxation finished for thread %d", (int)pthread_self());
-	}
+	// Getting an id for a pthread depends on the platform, so this is disabled for now
+	//if (__VERBOSE)
+	//{
+	//	printf("Relaxation finished for thread %d.\n");
+	//}
 
 	return 0;
 }
 
 
+/* Sets up and runs the threads
+*/
 void relaxationThreaded(float** inArray,
 						float** outArray,
 						int arraySize,
@@ -126,8 +192,6 @@ void relaxationThreaded(float** inArray,
 {
 	if (numThreads > 0)
 	{
-		//== Threading setup ==
-
 		// Calculate granularity
 		int currPos = 0;
 		// plus 2 because we want to overlap and edges are
@@ -137,6 +201,17 @@ void relaxationThreaded(float** inArray,
 		// To store the data for the thread function
 		LoopData	loopDataArray[numThreads];
 		pthread_t 	threads[numThreads];
+
+		// All threads must reach the barrier before we continue
+		pthread_barrier_t theBarrier;
+		pthread_barrier_init(&theBarrier, NULL, numThreads);
+
+		// Shared counter so processes know when they're finished
+		int finishedThreads = 0;
+
+		// Lock for the counter
+		pthread_mutex_t theLock;
+		pthread_mutex_init(&theLock, NULL);
 
 		// Loop and create/start threads
 		int i;
@@ -152,6 +227,10 @@ void relaxationThreaded(float** inArray,
 											  columnsRemaining : threadChunk;
 			loopDataArray[i].arrayY 		= arraySize;
 			loopDataArray[i].precision 		= precision;
+			loopDataArray[i].barrier		= &theBarrier;
+			loopDataArray[i].numThreads		= numThreads;
+			loopDataArray[i].finishedThreads= &finishedThreads;
+			loopDataArray[i].finLock		= &theLock;
 
 			if (__VERBOSE)
 			{
@@ -170,21 +249,34 @@ void relaxationThreaded(float** inArray,
 		{
 			pthread_join(threads[i], NULL);
 		}
+
+		// Cleanup
+		pthread_barrier_destroy(&theBarrier);
+		pthread_mutex_destroy(&theLock);
 	}
 	else
 	{
 		//== Serial Computation ==
 		LoopData data;
+		int finishedThreads = 0;
+
 		data.inArray 	= inArray;
 		data.outArray 	= outArray;
 		data.arrayX 	= arraySize;
 		data.arrayY		= arraySize;
 		data.precision 	= precision;
+		data.barrier 	= NULL;
+		data.finLock	= NULL;
+		data.numThreads = 1;
+		data.finishedThreads = &finishedThreads;
 
 		threadLoop((void*)&data);
 	}
 }
 
+
+/* Hopefully useful information on how to run the program.
+*/
 void printUsage()
 {
 	printf("Arguments are:\n"
@@ -198,7 +290,6 @@ void printUsage()
 	system("pause");
 	exit(0);
 }
-
 
 
 int main(int argc, char **argv)
@@ -262,14 +353,17 @@ int main(int argc, char **argv)
           		printUsage();
            }
 	}
-#ifdef PTHREAD_THREADS_MAX
+
+#ifdef PTHREAD_THREADS_MAX // Linux don't got this
 	if (numThreads > PTHREAD_THREADS_MAX)
 	{
 		numThreads = PTHREAD_THREADS_MAX;
 	}
 #endif
-	clock_t start_t, end_t, durr_t;
 
+	// Clock() seems slightly more accurate than time()
+	// at least on aquila it looks like milliseconds.
+	clock_t start_t, end_t, durr_t;
 	start_t = clock();
 
 	printf("Starting to relax %d square array to precision %f.",
@@ -281,21 +375,54 @@ int main(int argc, char **argv)
 	printf(". Seed: %d.\n", arrSeed);
 
 	// Initializing and mallocing the arrays
-	float** initialArray	= make2DFloatArray(arraySize, arraySize);
-	float** finalArray 		= make2DFloatArray(arraySize, arraySize);
-	initArray(initialArray, arraySize, arrSeed);
+	float** currArray = make2DFloatArray(arraySize, arraySize);
+	float** nextArray = make2DFloatArray(arraySize, arraySize);
+	initArray(currArray, arraySize, arrSeed);
 
-	relaxationThreaded(initialArray, finalArray, arraySize, precision, numThreads);
+	relaxationThreaded(currArray, nextArray, arraySize, precision, numThreads);
 
-	free2DFloatArray(initialArray, arraySize);
-	free2DFloatArray(finalArray, arraySize);
-
+	// Stop timer here.
 	end_t = clock();
+
+	// Create 2 more arrays, we'll do it again serially
+	float** currArray2 = make2DFloatArray(arraySize, arraySize);
+	float** nextArray2 = make2DFloatArray(arraySize, arraySize);
+	initArray(currArray2, arraySize, arrSeed);
+
+	if(__VERBOSE)
+	{
+		printf("Original:\n");
+		printSquareArray(currArray, arraySize);
+	}
+
+	relaxationThreaded(currArray2, nextArray2, arraySize, precision, 0);
+
+	int correct = checkDiff(nextArray, nextArray2, arraySize, arraySize, precision);
+
+	if(__VERBOSE)
+	{
+		printf("\nThreaded:\n");
+		printSquareArray(nextArray, arraySize);
+
+		printf("\nSerial:\n");
+		printSquareArray(nextArray2, arraySize);
+	}
+
+	// Cleanup
+	free2DFloatArray(currArray, arraySize);
+	free2DFloatArray(nextArray, arraySize);
+
+	free2DFloatArray(currArray2, arraySize);
+	free2DFloatArray(nextArray2, arraySize);
+
+	// *1.0f so we do float division rather than int division (which floors)
 	durr_t = end_t - start_t;
 	float durr_s = (durr_t * 1.0f) / (CLOCKS_PER_SEC * 1.0f);
 
 	printf("Relaxed %d square matrix in %ld ticks (%f sec, endticks: %ld)\n",
 		 arraySize, durr_t, durr_s, end_t);
+
+	printf("Threaded relaxation result %s the serial result.\n", correct ? "matched" : "didnt match");
 
 	// Windows command to stop console applications closing immediately.
 	system("pause");
