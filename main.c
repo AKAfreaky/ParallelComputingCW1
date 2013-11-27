@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/time.h>
 #include <string.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -48,11 +49,6 @@ int checkDiff( 	float** oldArray,
 			// if the values differ by more than the precision
 			if( abs(oldVal - newVal) > precision )
 			{
-				if (__VERBOSE)
-				{
-					printf("checkDiff failed on pos(%d, %d).\n", i, j);
-				}
-
 				return 0;	// the arrays are too different
 			}
 		}
@@ -127,13 +123,6 @@ void* threadLoop( void* inData)
 
 		averageFour(currArray, nextArray, arrayX, arrayY);
 
-		//Wait until everyones done that
-		if(theData->barrier != NULL)
-		{
-			pthread_barrier_wait(theData->barrier);
-		}
-
-
 		diff = checkDiff(currArray, nextArray, arrayX, arrayY, precision);
 
 		if (diff != 0)
@@ -171,12 +160,6 @@ void* threadLoop( void* inData)
 		}
 
 	}
-
-	// Getting an id for a pthread depends on the platform, so this is disabled for now
-	//if (__VERBOSE)
-	//{
-	//	printf("Relaxation finished for thread %d.\n");
-	//}
 
 	return 0;
 }
@@ -217,14 +200,22 @@ void relaxationThreaded(float** inArray,
 		int i;
 		for ( i = 0; i < numThreads; i++)
 		{
-			//pthread_t newThread;
-
-			int columnsRemaining = (arraySize - currPos);
+			// The last chunk is a bit of a special case
+			if ( i == (numThreads - 1) )
+			{
+				int columnsRemaining 		= (arraySize - currPos);
+				loopDataArray[i].arrayX 	= columnsRemaining;
+				threadChunk 				= columnsRemaining;
+			}
+			else // It shouldn't be possible for any chunk but the last to go
+			{   //  OOB, so keep that assumption (maybe bad practice, but
+				//  protections higher up should hide it)
+				loopDataArray[i].arrayX 	= threadChunk;
+			}
 
 			loopDataArray[i].inArray 		= &inArray[currPos];
 			loopDataArray[i].outArray		= &outArray[currPos];
-			loopDataArray[i].arrayX 		= threadChunk > columnsRemaining ?
-											  columnsRemaining : threadChunk;
+
 			loopDataArray[i].arrayY 		= arraySize;
 			loopDataArray[i].precision 		= precision;
 			loopDataArray[i].barrier		= &theBarrier;
@@ -240,7 +231,7 @@ void relaxationThreaded(float** inArray,
 			pthread_create(&threads[i], NULL,
 							threadLoop, (void*)&loopDataArray[i]);
 
-			currPos = threadChunk - 2;
+			currPos += threadChunk - 2;
 
 		}
 
@@ -285,7 +276,8 @@ void printUsage()
 			"\t-t\t:\tInteger\t-\tThe number of threads to use\n"
 			"\t-r\t:\tInteger\t-\tSeed to use when filling the array. "
 			"Zero will use current time() as the seed\n"
-			"\t-v\t:\tNone\t-\tFlag to enable more console spew\n");
+			"\t-v\t:\tNone\t-\tFlag to enable more console spew\n"
+			"\t-c\t:\tNone\t-\tFlag to enable the correctness test\n");
 	// Windows command to stop console applications closing immediately.
 	system("pause");
 	exit(0);
@@ -300,13 +292,14 @@ int main(int argc, char **argv)
 	int numThreads 	= 2;
 	__VERBOSE 		= 0;
 	int arrSeed		= time(0);
+	int testRight	= 0;
 
 	// Read options
 	// -s is the size, -p is the precision and -t is number of threads.
 	// -v turns on some debug spew
 	int c;
 	opterr = 0;
-	while ((c = getopt (argc, argv, "s:p:t:vr:")) != -1)
+	while ((c = getopt (argc, argv, "s:p:t:vr:c")) != -1)
 	{
 		switch (c)
 		{
@@ -349,6 +342,9 @@ int main(int argc, char **argv)
 			case 'v':
 				__VERBOSE = 1;
 				break;
+		case 'c':
+			testRight = 1;
+			break;
           	default:
           		printUsage();
            }
@@ -361,16 +357,20 @@ int main(int argc, char **argv)
 	}
 #endif
 
-	// Clock() seems slightly more accurate than time()
-	// at least on aquila it looks like milliseconds.
-	clock_t start_t, end_t, durr_t;
-	start_t = clock();
+	if (numThreads && (arraySize / numThreads) < 2)
+	{
+		numThreads = arraySize / 2;
+	}
+
+	// Start timer
+	struct timeval start_tv, end_tv;
+	gettimeofday(&start_tv,NULL);
 
 	printf("Starting to relax %d square array to precision %f.",
 			arraySize, precision);
 
-	printf("Using %d thread%s (other than main). starttick: %ld",
-		numThreads, numThreads == 1 ? "" : "s", start_t);
+	printf("Using %d thread%s (other than main).\n",
+			numThreads, numThreads == 1 ? "" : "s");
 
 	printf(". Seed: %d.\n", arrSeed);
 
@@ -379,50 +379,59 @@ int main(int argc, char **argv)
 	float** nextArray = make2DFloatArray(arraySize, arraySize);
 	initArray(currArray, arraySize, arrSeed);
 
+	// Do the work
 	relaxationThreaded(currArray, nextArray, arraySize, precision, numThreads);
 
 	// Stop timer here.
-	end_t = clock();
+	gettimeofday(&end_tv,NULL);
 
-	// Create 2 more arrays, we'll do it again serially
-	float** currArray2 = make2DFloatArray(arraySize, arraySize);
-	float** nextArray2 = make2DFloatArray(arraySize, arraySize);
-	initArray(currArray2, arraySize, arrSeed);
+	int correct = 0;
 
-	if(__VERBOSE)
+	if(testRight)
 	{
-		printf("Original:\n");
-		printSquareArray(currArray, arraySize);
-	}
+		// Create 2 more arrays, we'll do it again serially
+		float** currArray2 = make2DFloatArray(arraySize, arraySize);
+		float** nextArray2 = make2DFloatArray(arraySize, arraySize);
+		initArray(currArray2, arraySize, arrSeed);
 
-	relaxationThreaded(currArray2, nextArray2, arraySize, precision, 0);
+		if(__VERBOSE)
+		{
+			printf("Original:\n");
+			printSquareArray(currArray, arraySize);
+		}
 
-	int correct = checkDiff(nextArray, nextArray2, arraySize, arraySize, precision);
+		relaxationThreaded(currArray2, nextArray2, arraySize, precision, 0);
 
-	if(__VERBOSE)
-	{
-		printf("\nThreaded:\n");
-		printSquareArray(nextArray, arraySize);
+		correct = checkDiff(nextArray, nextArray2, arraySize, arraySize, precision);
 
-		printf("\nSerial:\n");
-		printSquareArray(nextArray2, arraySize);
+		if(__VERBOSE)
+		{
+			printf("\nThreaded:\n");
+			printSquareArray(nextArray, arraySize);
+
+			printf("\nSerial:\n");
+			printSquareArray(nextArray2, arraySize);
+		}
+		// Cleanup
+		free2DFloatArray(currArray2, arraySize);
+		free2DFloatArray(nextArray2, arraySize);
 	}
 
 	// Cleanup
 	free2DFloatArray(currArray, arraySize);
 	free2DFloatArray(nextArray, arraySize);
 
-	free2DFloatArray(currArray2, arraySize);
-	free2DFloatArray(nextArray2, arraySize);
+	long long durr_us = (end_tv.tv_sec * (long long)1000000 + end_tv.tv_usec) -
+ 					(start_tv.tv_sec * (long long)1000000 + start_tv.tv_usec);
 
-	// *1.0f so we do float division rather than int division (which floors)
-	durr_t = end_t - start_t;
-	float durr_s = (durr_t * 1.0f) / (CLOCKS_PER_SEC * 1.0f);
+	printf("Relaxed %d square matrix in %llu microsceonds\n",
+			arraySize, durr_us);
 
-	printf("Relaxed %d square matrix in %ld ticks (%f sec, endticks: %ld)\n",
-		 arraySize, durr_t, durr_s, end_t);
-
-	printf("Threaded relaxation result %s the serial result.\n", correct ? "matched" : "didnt match");
+	if(testRight)
+	{
+		printf("Threaded relaxation result %s the serial result.\n",
+ 			correct ? "matched" : "didnt match");
+	}
 
 	// Windows command to stop console applications closing immediately.
 	system("pause");

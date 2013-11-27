@@ -11,7 +11,7 @@ void initArray( float** theArray, int arraySize, int seed )
 	{
 		for( j = 0; j < arraySize; j++ )
 		{
-			int value =  rand();
+			float value =  (rand() % 10000) + 1.0f;
 			theArray[i][j] = value;
 		}
 	}
